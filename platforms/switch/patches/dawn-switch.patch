@@ -1,0 +1,219 @@
+diff --git a/src/dawn/native/opengl/BackendGL.cpp b/src/dawn/native/opengl/BackendGL.cpp
+index e6dd0cec9..53c3f414a 100644
+--- a/src/dawn/native/opengl/BackendGL.cpp
++++ b/src/dawn/native/opengl/BackendGL.cpp
+@@ -91,10 +91,14 @@ std::vector<Ref<PhysicalDeviceBase>> Backend::DiscoverPhysicalDevices(
+         Ref<DisplayEGL> display;
+         DAWN_TRY_ASSIGN(display, std::move(maybeDisplay));
+ 
++#if !DAWN_PLATFORM_IS(SWITCH)
++        // mp4-switch: devkitPro's Mesa EGL lacks it; ContextEGL skips the robust-access attribute
++        // there and Tint's shader robustness still applies.
+         if (!display->egl->HasExt(EGLExt::CreateContextRobustness)) {
+             return DAWN_VALIDATION_ERROR("EGL_EXT_create_context_robustness is required.");
+         }
+-        if (!display->egl->HasExt(EGLExt::FenceSync) &&
++#endif
++        if (!DAWN_PLATFORM_IS(SWITCH) && !display->egl->HasExt(EGLExt::FenceSync) &&
+             !display->egl->HasExt(EGLExt::ReusableSync)) {
+             return DAWN_INTERNAL_ERROR(
+                 "EGL_KHR_fence_sync or EGL_KHR_reusable_sync must be supported");
+diff --git a/src/dawn/native/opengl/CommandBufferGL.cpp b/src/dawn/native/opengl/CommandBufferGL.cpp
+index 6fb9bcd28..fad70438f 100644
+--- a/src/dawn/native/opengl/CommandBufferGL.cpp
++++ b/src/dawn/native/opengl/CommandBufferGL.cpp
+@@ -1671,9 +1671,21 @@ MaybeError CommandBuffer::ExecuteRenderPass(BeginRenderPassCmd* renderPass,
+                     // Floating-point viewport coords are unsupported on OpenGL ES, but
+                     // truncation is ok because other APIs do not guarantee subpixel precision
+                     // either.
+-                    DAWN_GL_TRY(
+-                        gl, Viewport(static_cast<int>(cmd->x), static_cast<int>(cmd->y),
+-                                     static_cast<int>(cmd->width), static_cast<int>(cmd->height)));
++                    // glViewport raises GL_INVALID_VALUE for negative sizes (which also
++                    // covers NaN after the int cast). Sanitize instead of losing the device.
++                    auto toCoord = [](float v) -> int {
++                        if (!(v == v)) return 0;  // NaN
++                        if (v > 32767.0f) return 32767;
++                        if (v < -32768.0f) return -32768;
++                        return static_cast<int>(v);
++                    };
++                    auto toSize = [](float v) -> int {
++                        if (!(v > 0.0f)) return 0;  // negative or NaN
++                        if (v > 32767.0f) return 32767;
++                        return static_cast<int>(v);
++                    };
++                    DAWN_GL_TRY(gl, Viewport(toCoord(cmd->x), toCoord(cmd->y),
++                                             toSize(cmd->width), toSize(cmd->height)));
+                 }
+                 minDepth = cmd->minDepth;
+                 maxDepth = cmd->maxDepth;
+diff --git a/src/dawn/native/opengl/ContextEGL.cpp b/src/dawn/native/opengl/ContextEGL.cpp
+index cac0e8c6e..fd8ae9a39 100644
+--- a/src/dawn/native/opengl/ContextEGL.cpp
++++ b/src/dawn/native/opengl/ContextEGL.cpp
+@@ -168,6 +168,10 @@ MaybeError ContextEGL::Initialize(wgpu::BackendType backend,
+         AddAttrib(EGL_CONTEXT_CLIENT_VERSION, 2);
+     }
+ 
++    if (useRobustness && !egl.HasExt(EGLExt::CreateContextRobustness)) {
++        // mp4-switch: context robustness unavailable (Horizon Mesa); shaders stay robust.
++        useRobustness = false;
++    }
+     if (useRobustness) {
+         DAWN_ASSERT(egl.HasExt(EGLExt::CreateContextRobustness));
+         // EGL_EXT_create_context_robustness is promoted to 1.5 but with a different enum value.
+diff --git a/src/dawn/native/opengl/PhysicalDeviceGL.cpp b/src/dawn/native/opengl/PhysicalDeviceGL.cpp
+index a1e8d65ad..8888863c5 100644
+--- a/src/dawn/native/opengl/PhysicalDeviceGL.cpp
++++ b/src/dawn/native/opengl/PhysicalDeviceGL.cpp
+@@ -551,7 +551,9 @@ ResultOrError<Ref<DeviceBase>> PhysicalDevice::CreateDeviceImpl(
+                                                 forceES31AndMinExtensions, bindContextOnlyDuringUse,
+                                                 mAngleVirtualizationGroup));
+     std::unique_ptr<ContextEGL> pipelineContext;
+-    if (deviceToggles.IsEnabled(Toggle::GLAllowContextOnMultiThreads) &&
++    // mp4-switch: Horizon Mesa's EGL does not share objects between contexts (programs linked on
++    // the pipeline context are invalid on the main one), so pipelines compile on the main context.
++    if (!DAWN_PLATFORM_IS(SWITCH) && deviceToggles.IsEnabled(Toggle::GLAllowContextOnMultiThreads) &&
+         !deviceToggles.IsEnabled(Toggle::GLDefer)) {
+         DAWN_TRY_ASSIGN(pipelineContext,
+                         ContextEGL::Create(mDisplay, GetBackendType(), useRobustness,
+diff --git a/src/dawn/native/opengl/QueueGL.cpp b/src/dawn/native/opengl/QueueGL.cpp
+index b082e5afe..91dce9a32 100644
+--- a/src/dawn/native/opengl/QueueGL.cpp
++++ b/src/dawn/native/opengl/QueueGL.cpp
+@@ -74,7 +74,8 @@ Queue::Queue(Device* device, const QueueDescriptor* descriptor) : QueueBase(devi
+     } else if (egl.HasExt(EGLExt::ReusableSync)) {
+         mEGLSyncType = EGL_SYNC_REUSABLE_KHR;
+     } else {
+-        DAWN_UNREACHABLE();
++        // mp4-switch: WrappedEGLSync falls back to a GLES fence for this type.
++        mEGLSyncType = EGL_SYNC_FENCE;
+     }
+ }
+ 
+diff --git a/src/dawn/native/opengl/SwapChainEGL.cpp b/src/dawn/native/opengl/SwapChainEGL.cpp
+index 767a91db5..297fda80d 100644
+--- a/src/dawn/native/opengl/SwapChainEGL.cpp
++++ b/src/dawn/native/opengl/SwapChainEGL.cpp
+@@ -28,6 +28,11 @@
+ #include "src/dawn/native/opengl/SwapChainEGL.h"
+ 
+ #include <utility>
++#if defined(__SWITCH__)
++extern "C" {
++#include <switch/display/native_window.h>
++}
++#endif
+ 
+ #include "src/dawn/native/Surface.h"
+ #include "src/dawn/native/opengl/ContextEGL.h"
+@@ -114,6 +119,18 @@ MaybeError SwapChainEGL::PresentImpl() {
+                           "getting surface width"));
+         DAWN_TRY(CheckEGL(egl, egl.QuerySurface(display, mEGLSurface, EGL_HEIGHT, &surfaceHeight),
+                           "getting surface height"));
++#if DAWN_PLATFORM_IS(SWITCH)
++        // mp4-switch: Horizon's Mesa EGL never fills in the surface size (it reports 0x0); its
++        // back buffers are sized from the NWindow, so take the size from there.
++        if (surfaceWidth <= 0 || surfaceHeight <= 0) {
++            u32 nwWidth = 0;
++            u32 nwHeight = 0;
++            nwindowGetDimensions(static_cast<NWindow*>(GetSurface()->GetSwitchNWindow()),
++                                 &nwWidth, &nwHeight);
++            surfaceWidth = static_cast<EGLint>(nwWidth);
++            surfaceHeight = static_cast<EGLint>(nwHeight);
++        }
++#endif
+ 
+         const OpenGLFunctions& gl = device->GetGL(/*makeCurrent=*/false);
+ 
+@@ -228,6 +245,14 @@ MaybeError SwapChainEGL::CreateEGLSurface(const DisplayEGL* display) {
+                     eglDisplay, config, uint32_t(surface->GetXWindow()), attribs.data());
+                 return {};
+ #endif  // defined(DAWN_USE_X11)
++#if DAWN_PLATFORM_IS(SWITCH)
++            // mp4-switch: Mesa's Horizon EGL takes the NWindow as its native window.
++            case Surface::Type::SwitchNWindow:
++                mEGLSurface = egl.CreateWindowSurface(
++                    eglDisplay, config, static_cast<EGLNativeWindowType>(surface->GetSwitchNWindow()),
++                    attribs.data());
++                return {};
++#endif  // DAWN_PLATFORM_IS(SWITCH)
+ 
+             // TODO(344814083): Add support for creating surfaces using EGL_KHR_platform_base and
+             // friends.
+diff --git a/src/dawn/native/opengl/UtilsEGL.cpp b/src/dawn/native/opengl/UtilsEGL.cpp
+index e7284a42f..549a36c22 100644
+--- a/src/dawn/native/opengl/UtilsEGL.cpp
++++ b/src/dawn/native/opengl/UtilsEGL.cpp
+@@ -104,11 +104,25 @@ MaybeError CheckEGL(const EGLFunctions& egl, EGLBoolean result, const char* cont
+ }
+ 
+ ResultOrError<Ref<WrappedEGLSync>> WrappedEGLSync::Create(DisplayEGL* display,
+-                                                          const OpenGLFunctions&,
++                                                          const OpenGLFunctions& gl,
+                                                           EGLenum type,
+                                                           const EGLint* attribs) {
+     const EGLFunctions& egl = display->egl.get();
+ 
++    // egl.CreateSync is only loaded on EGL 1.5 and is uninitialized otherwise, so test the version.
++    // Not with IsAtLeastVersion: its comparison is reversed and it says yes on 1.4.
++    if (DAWN_PLATFORM_IS(SWITCH) && !egl.HasExt(EGLExt::FenceSync) && egl.GetMinorVersion() < 5) {
++        // mp4-switch: GLES 3.0 fence in place of the missing EGL_KHR_fence_sync.
++        GLsync glSync = gl.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++        if (glSync == nullptr) {
++            return DAWN_INTERNAL_ERROR("glFenceSync failed");
++        }
++        Ref<WrappedEGLSync> wrapped =
++            AcquireRef(new WrappedEGLSync(display, reinterpret_cast<EGLSync>(glSync), true));
++        wrapped->mGL = &gl;
++        return wrapped;
++    }
++
+     EGLSyncKHR sync = EGL_NO_SYNC;
+     // We don't use OpenGLFunctions struct. However eglCreateSync requires a current context,
+     // so a OpenGLFunctions parameter restricts the caller to call this inside Device's
+@@ -154,6 +168,10 @@ WrappedEGLSync::WrappedEGLSync(DisplayEGL* display, EGLSync sync, bool ownsSync)
+ }
+ 
+ WrappedEGLSync::~WrappedEGLSync() {
++    if (mGL != nullptr) {
++        mGL->DeleteSync(reinterpret_cast<GLsync>(mSync));
++        return;
++    }
+     if (mOwnsSync) {
+         const EGLFunctions& egl = mDisplay->egl.get();
+         if (egl.HasExt(EGLExt::FenceSync)) {
+@@ -182,6 +200,19 @@ ResultOrError<EGLenum> WrappedEGLSync::ClientWait(const OpenGLFunctions&,
+                                                   Nanoseconds timeout) {
+     const EGLFunctions& egl = mDisplay->egl.get();
+ 
++    if (mGL != nullptr) {
++        const GLenum r = mGL->ClientWaitSync(reinterpret_cast<GLsync>(mSync),
++                                             (flags & EGL_SYNC_FLUSH_COMMANDS_BIT) ? GL_SYNC_FLUSH_COMMANDS_BIT : 0,
++                                             uint64_t(timeout));
++        if (r == GL_TIMEOUT_EXPIRED) {
++            return EGLenum(EGL_TIMEOUT_EXPIRED);
++        }
++        if (r == GL_ALREADY_SIGNALED || r == GL_CONDITION_SATISFIED) {
++            return EGLenum(EGL_CONDITION_SATISFIED);
++        }
++        return DAWN_INTERNAL_ERROR("glClientWaitSync failed");
++    }
++
+     EGLenum result = EGL_FALSE;
+     if (egl.HasExt(EGLExt::FenceSync)) {
+         result = egl.ClientWaitSyncKHR(mDisplay->GetDisplay(), mSync, flags, uint64_t(timeout));
+diff --git a/src/dawn/native/opengl/UtilsEGL.h b/src/dawn/native/opengl/UtilsEGL.h
+index c6e291826..8f8520136 100644
+--- a/src/dawn/native/opengl/UtilsEGL.h
++++ b/src/dawn/native/opengl/UtilsEGL.h
+@@ -75,6 +75,9 @@ class WrappedEGLSync : public RefCounted, NonMovable {
+     Ref<DisplayEGL> mDisplay;
+     EGLSync mSync = nullptr;
+     bool mOwnsSync = false;
++    // mp4-switch: a GLsync stands in for the EGL sync when the display has no EGL fence
++    // extension (Horizon Mesa). mGL deletes it.
++    const OpenGLFunctions* mGL = nullptr;
+ };
+ 
+ }  // namespace dawn::native::opengl

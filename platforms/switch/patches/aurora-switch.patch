@@ -1,0 +1,474 @@
+diff --git a/cmake/AuroraDearImguiProvider.cmake b/cmake/AuroraDearImguiProvider.cmake
+index 994196d..4dbf224 100644
+--- a/cmake/AuroraDearImguiProvider.cmake
++++ b/cmake/AuroraDearImguiProvider.cmake
+@@ -21,11 +21,15 @@ if (NOT TARGET imgui)
+                 ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
+         )
+ 
+-        add_library(imgui_backends STATIC
+-                ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+-                ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp
+-                ${imgui_SOURCE_DIR}/backends/imgui_impl_wgpu.cpp
+-        )
++        set(AURORA_IMGUI_BACKEND_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_wgpu.cpp)
++        if (NOT NX)
++            # sdl3on2 (Switch) lacks parts of the SDL3 API these backends call.
++            list(APPEND AURORA_IMGUI_BACKEND_SOURCES
++                    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
++                    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp
++            )
++        endif ()
++        add_library(imgui_backends STATIC ${AURORA_IMGUI_BACKEND_SOURCES})
+         target_compile_definitions(imgui_backends PRIVATE IMGUI_IMPL_WEBGPU_BACKEND_DAWN)
+         target_link_libraries(imgui_backends PRIVATE imgui ${AURORA_SDL3_TARGET} dawn::webgpu_dawn)
+         target_link_libraries(imgui PUBLIC imgui_backends imgui_headers)
+diff --git a/include/aurora/imgui_config.h b/include/aurora/imgui_config.h
+index 3e62e59..ac9a878 100644
+--- a/include/aurora/imgui_config.h
++++ b/include/aurora/imgui_config.h
+@@ -2,8 +2,15 @@
+ 
+ #define IMGUI_DISABLE_DEFAULT_FILE_FUNCTIONS 1
+ 
++#ifdef __SWITCH__
++// The default URL opener needs fork and execvp, which Horizon lacks.
++#define IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS 1
++// sdl3on2 defines SDL_IOStream as a macro for its own stream type.
++typedef struct S3_IOStream* ImFileHandle;
++#else
+ typedef struct SDL_IOStream SDL_IOStream;
+ typedef SDL_IOStream* ImFileHandle;
++#endif
+ typedef unsigned long long ImU64;
+ 
+ ImFileHandle ImFileOpen(const char* filename, const char* mode);
+diff --git a/lib/dawn/BackendBinding.cpp b/lib/dawn/BackendBinding.cpp
+index 447ead8..bedcaac 100644
+--- a/lib/dawn/BackendBinding.cpp
++++ b/lib/dawn/BackendBinding.cpp
+@@ -4,7 +4,9 @@
+ 
+ #include <memory>
+ 
+-#if !defined(SDL_PLATFORM_MACOS) && !defined(SDL_PLATFORM_IOS) && !defined(SDL_PLATFORM_TVOS)
++#if defined(__SWITCH__)
++#include <switch.h>
++#elif !defined(SDL_PLATFORM_MACOS) && !defined(SDL_PLATFORM_IOS) && !defined(SDL_PLATFORM_TVOS)
+ #include <SDL3/SDL_video.h>
+ #endif
+ 
+@@ -16,6 +18,12 @@ std::shared_ptr<wgpu::ChainedStruct> SetupWindowAndGetSurfaceDescriptorCocoa(SDL
+ std::shared_ptr<wgpu::ChainedStruct> SetupWindowAndGetSurfaceDescriptor(SDL_Window* window) {
+ #if defined(SDL_PLATFORM_MACOS) || defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+   return SetupWindowAndGetSurfaceDescriptorCocoa(window);
++#elif defined(__SWITCH__)
++  // Horizon: render to the default NWindow; SDL2's Switch window exposes no native handle.
++  (void)window;
++  std::shared_ptr<wgpu::SurfaceSourceSwitchNWindow> desc = std::make_shared<wgpu::SurfaceSourceSwitchNWindow>();
++  desc->window = nwindowGetDefault();
++  return std::move(desc);
+ #else
+   const auto props = SDL_GetWindowProperties(window);
+ #if defined(SDL_PLATFORM_ANDROID)
+diff --git a/lib/dolphin/card.cpp b/lib/dolphin/card.cpp
+index 24b537e..5244a8a 100644
+--- a/lib/dolphin/card.cpp
++++ b/lib/dolphin/card.cpp
+@@ -1,7 +1,10 @@
+ #include "dolphin/card.h"
+ 
++#include <cstdio>
+ #include <cstring>
+ #include <filesystem>
++#include <string>
++#include <vector>
+ 
+ #include "aurora/card.h"
+ #include "../internal.hpp"
+@@ -291,6 +294,130 @@ void CARDSetBasePath(const char* path, const s32 chan) {
+ 
+ void CARDSetLoadType(CARDFileType type) { SelectedFileType = type; }
+ 
++#ifdef __SWITCH__
++// mp4-switch: every card write copies the whole image to a temporary file (see open_atomic_file),
++// which takes seconds for a 16 MiB image on an SD card. Move an oversized image's saves to a
++// 59-block one (512 KiB), keeping the original as <name>.bak. On any doubt the card stays as it was.
++static void shrink_raw_card(const std::filesystem::path& path, const char* game, const char* maker) {
++  constexpr size_t BlockSize = 0x2000;
++  constexpr size_t EntrySize = 0x40;
++  constexpr size_t EntryCount = 127;
++  constexpr uint32_t SmallBlocks = 59;
++  constexpr uint16_t SmallMbit = 4;
++
++  std::error_code ec;
++  if (SelectedFileType != CARD_RAWIMAGE || game == nullptr || maker == nullptr ||
++      !std::filesystem::exists(path, ec)) {
++    return;
++  }
++  const std::string pathString = aurora::io::fs_path_to_string(path);
++
++  std::vector<uint8_t> head(BlockSize * 3);
++  FILE* file = std::fopen(pathString.c_str(), "rb");
++  if (file == nullptr) {
++    return;
++  }
++  const size_t headRead = std::fread(head.data(), 1, head.size(), file);
++  std::fclose(file);
++  const auto be16 = [](const uint8_t* p) { return static_cast<uint16_t>((p[0] << 8) | p[1]); };
++  if (headRead != head.size() || be16(&head[0x22]) <= SmallMbit) {
++    return;
++  }
++
++  // The directory with the higher update counter is the live one.
++  const uint8_t* dir0 = &head[BlockSize];
++  const uint8_t* dir1 = &head[BlockSize * 2];
++  const uint8_t* dir = be16(dir0 + 0x1FFA) >= be16(dir1 + 0x1FFA) ? dir0 : dir1;
++  std::vector<std::string> names;
++  uint32_t usedBlocks = 0;
++  for (size_t i = 0; i < EntryCount; ++i) {
++    const uint8_t* entry = dir + i * EntrySize;
++    if (entry[0] == 0xFF) {
++      continue;
++    }
++    if (std::strncmp(reinterpret_cast<const char*>(entry), game, 4) != 0 ||
++        std::strncmp(reinterpret_cast<const char*>(entry + 4), maker, 2) != 0) {
++      Log.warn("Keeping large card {}: it holds another game's save", pathString);
++      return;
++    }
++    names.emplace_back(reinterpret_cast<const char*>(entry + 8), strnlen(reinterpret_cast<const char*>(entry + 8), 32));
++    usedBlocks += be16(entry + 0x38);
++  }
++  if (usedBlocks > SmallBlocks) {
++    Log.warn("Keeping large card {}: {} blocks in use", pathString, usedBlocks);
++    return;
++  }
++
++  auto smallPath = path;
++  smallPath += ".small";
++  auto backupPath = path;
++  backupPath += ".bak";
++  if (std::filesystem::exists(backupPath, ec)) {
++    Log.warn("Keeping large card {}: {} already exists", pathString, aurora::io::fs_path_to_string(backupPath));
++    return;
++  }
++  std::filesystem::remove(smallPath, ec);
++
++  bool ok = false;
++  {
++    aurora::card::CardRawFile large;
++    aurora::card::CardRawFile small;
++    large.InitCard(game, maker);
++    small.InitCard(game, maker);
++    ok = large.open(path);
++    if (ok) {
++      small.open(smallPath);
++      ok = small.format(aurora::card::ECardSlot::SlotA, aurora::card::ECardSize::Card59Mb) ==
++           aurora::card::ECardResult::READY;
++      small.close();
++      ok = ok && small.open(smallPath);
++    }
++    std::vector<std::vector<uint8_t>> saves;
++    for (const auto& name : names) {
++      if (!ok) {
++        break;
++      }
++      std::vector<uint8_t> gci(large.extractGci(name.c_str(), nullptr, 0));
++      ok = !gci.empty() && large.extractGci(name.c_str(), gci.data(), gci.size()) == gci.size() &&
++           small.insertGci(gci.data(), gci.size(), false);
++      saves.push_back(std::move(gci));
++    }
++    ok = ok && small.commit() == aurora::card::ECardResult::READY;
++    small.close();
++
++    // Read the new image back; the first 64 bytes are the directory entry, which may differ.
++    ok = ok && small.open(smallPath);
++    for (size_t i = 0; ok && i < names.size(); ++i) {
++      std::vector<uint8_t> copy(saves[i].size());
++      ok = small.extractGci(names[i].c_str(), copy.data(), copy.size()) == copy.size() &&
++           std::memcmp(copy.data() + 64, saves[i].data() + 64, copy.size() - 64) == 0;
++    }
++    small.close();
++    large.close();
++  }
++
++  if (ok) {
++    std::filesystem::rename(path, backupPath, ec);
++    ok = !ec;
++  }
++  if (ok) {
++    std::filesystem::rename(smallPath, path, ec);
++    if (ec) {
++      std::error_code restoreError;
++      std::filesystem::rename(backupPath, path, restoreError);
++      ok = false;
++    }
++  }
++  if (!ok) {
++    std::filesystem::remove(smallPath, ec);
++    Log.warn("Could not shrink card {}; keeping it as it was", pathString);
++    return;
++  }
++  Log.info("Moved {} save(s) to a 59-block card; the original is {}", names.size(),
++           aurora::io::fs_path_to_string(backupPath));
++}
++#endif
++
+ void CARDInit(const char* game, const char* maker) {
+   if (Initialized) {
+     return;
+@@ -327,6 +454,10 @@ void CARDInit(const char* game, const char* maker) {
+ 
+     const auto& curPath = cardPaths[i];
+ 
++#ifdef __SWITCH__
++    shrink_raw_card(curPath, game, maker);
++#endif
++
+     std::error_code ec;
+     if (std::filesystem::exists(curPath, ec) && CardChannels[i]->open(curPath)) {
+       loadedCard = true;
+@@ -341,7 +472,11 @@ void CARDInit(const char* game, const char* maker) {
+   std::error_code createError;
+   if (!loadedCard && !std::filesystem::exists(cardPaths[0], createError) && !createError) {
+     CardChannels[0]->open(cardPaths[0]);
++#ifdef __SWITCH__
++    CardChannels[0]->format(aurora::card::ECardSlot::SlotA, aurora::card::ECardSize::Card59Mb);
++#else
+     CardChannels[0]->format(aurora::card::ECardSlot::SlotA);
++#endif
+     CardChannels[0]->close();
+     CardChannels[0]->open(cardPaths[0]);
+   }
+diff --git a/lib/dolphin/os/OSMemory.cpp b/lib/dolphin/os/OSMemory.cpp
+index 2a963a5..7499b30 100644
+--- a/lib/dolphin/os/OSMemory.cpp
++++ b/lib/dolphin/os/OSMemory.cpp
+@@ -136,6 +136,26 @@ static void* AllocMEM1(u32 size) {
+   assert(result == mem1Address);
+   return result;
+ }
++#elif defined(__SWITCH__)
++#include <switch.h>
++#include <cstring>
++#include <malloc.h>
++// mp4-switch: MEM1 between two no-access guard regions, so a game write past either end faults
++// where it happens instead of corrupting the C heap.
++static void* AllocMEM1(u32 size) {
++  constexpr size_t Guard = 0x100000;
++  const size_t body = (static_cast<size_t>(size) + 0xFFF) & ~static_cast<size_t>(0xFFF);
++  auto* block = static_cast<u8*>(memalign(0x1000, Guard + body + Guard));
++  if (block == nullptr) {
++    return calloc(1, size);
++  }
++  std::memset(block + Guard, 0, body);
++  if (R_FAILED(svcSetMemoryPermission(block, Guard, Perm_None)) ||
++      R_FAILED(svcSetMemoryPermission(block + Guard + body, Guard, Perm_None))) {
++    Log.warn("MEM1 guard pages unavailable");
++  }
++  return block + Guard;
++}
+ #else
+ static void* AllocMEM1(u32 size) {
+   return calloc(1, size);
+diff --git a/lib/gfx/texture_format.cpp b/lib/gfx/texture_format.cpp
+index 3111942..8eb2303 100644
+--- a/lib/gfx/texture_format.cpp
++++ b/lib/gfx/texture_format.cpp
+@@ -16,7 +16,8 @@ constexpr u32 div_ceil(u32 value, u32 divisor) noexcept { return (value + diviso
+ 
+ TextureFormatInfo format_info(wgpu::TextureFormat format) noexcept {
+   switch (format) {
+-    DEFAULT_FATAL("unimplemented texture format {}", magic_enum::enum_name(format));
++    DEFAULT_FATAL("unimplemented texture format {} (0x{:x})", magic_enum::enum_name(format),
++                  static_cast<uint32_t>(format));
+   case wgpu::TextureFormat::R8Unorm:
+     return {1, 1, 1, false};
+   case wgpu::TextureFormat::RG8Unorm:
+diff --git a/lib/imgui.cpp b/lib/imgui.cpp
+index 77f65fd..434f54b 100644
+--- a/lib/imgui.cpp
++++ b/lib/imgui.cpp
+@@ -1,6 +1,7 @@
+ #include "imgui.hpp"
+ 
+ #include <cstddef>
++#include <chrono>
+ #include <cmath>
+ #include <cstring>
+ #include <memory>
+@@ -19,8 +20,10 @@
+ #include "window.hpp"
+ 
+ #define IMGUI_IMPL_WEBGPU_BACKEND_DAWN
++#ifndef __SWITCH__
+ #include "backends/imgui_impl_sdl3.h"
+ #include "backends/imgui_impl_sdlrenderer3.h"
++#endif
+ #include "backends/imgui_impl_wgpu.h"
+ #include "tracy/Tracy.hpp"
+ 
+@@ -133,12 +136,20 @@ void create_context() noexcept {
+ 
+ void initialize() noexcept {
+   ZoneScoped;
++#ifdef __SWITCH__
++  // no SDL3 platform backend on Switch; the overlay takes no pointer or key input.
++  SDL_Renderer* renderer = nullptr;
++#else
+   SDL_Renderer* renderer = window::get_sdl_renderer();
+   ImGui_ImplSDL3_InitForSDLRenderer(window::get_sdl_window(), renderer);
++#endif
+   g_useSdlRenderer = renderer != nullptr;
++#ifndef __SWITCH__
+   if (g_useSdlRenderer) {
+     ImGui_ImplSDLRenderer3_Init(renderer);
+-  } else {
++  } else
++#endif
++  {
+     ImGui_ImplWGPU_InitInfo info;
+     info.Device = webgpu::g_device.Get();
+     info.RenderTargetFormat = static_cast<WGPUTextureFormat>(webgpu::g_graphicsConfig.surfaceConfiguration.format);
+@@ -157,11 +168,15 @@ void shutdown() noexcept {
+   input::unregister_layer(g_inputLayer);
+   g_inputLayer = input::kInvalidLayerId;
+   if (g_useSdlRenderer) {
++#ifndef __SWITCH__
+     ImGui_ImplSDLRenderer3_Shutdown();
++#endif
+   } else {
+     ImGui_ImplWGPU_Shutdown();
+   }
++#ifndef __SWITCH__
+   ImGui_ImplSDL3_Shutdown();
++#endif
+   ImGui::DestroyContext();
+   for (const auto& texture : g_sdlTextures) {
+     SDL_DestroyTexture(texture);
+@@ -185,6 +200,9 @@ void set_cursor_managed(bool managed) noexcept {
+ }
+ 
+ void process_event(const SDL_Event& event) noexcept {
++#ifdef __SWITCH__
++  (void)event;
++#else
+   auto renderEvent = event;
+   if (g_useSdlRenderer) {
+     if (SDL_Renderer* renderer = window::get_sdl_renderer()) {
+@@ -192,6 +210,7 @@ void process_event(const SDL_Event& event) noexcept {
+     }
+   }
+   ImGui_ImplSDL3_ProcessEvent(&renderEvent);
++#endif
+ }
+ 
+ void new_frame(const AuroraWindowSize& size) noexcept {
+@@ -202,6 +221,7 @@ void new_frame(const AuroraWindowSize& size) noexcept {
+   };
+   ImVec2 displaySize{static_cast<float>(size.width), static_cast<float>(size.height)};
+ 
++#ifndef __SWITCH__
+   if (g_useSdlRenderer) {
+     if (SDL_Renderer* renderer = window::get_sdl_renderer()) {
+       float renderScaleX = 1.0f;
+@@ -221,7 +241,9 @@ void new_frame(const AuroraWindowSize& size) noexcept {
+     }
+     ImGui_ImplSDLRenderer3_NewFrame();
+     g_scale = size.scale;
+-  } else {
++  } else
++#endif
++  {
+     if (g_scale != size.scale) {
+       if (g_scale > 0.f) {
+         ImGui_ImplWGPU_CreateDeviceObjects();
+@@ -233,7 +255,20 @@ void new_frame(const AuroraWindowSize& size) noexcept {
+     }
+     ImGui_ImplWGPU_NewFrame();
+   }
++#ifdef __SWITCH__
++  // set the frame delta the SDL3 backend would.
++  {
++    static std::chrono::steady_clock::time_point sLast{};
++    const auto now = std::chrono::steady_clock::now();
++    const float delta = sLast.time_since_epoch().count() == 0
++                            ? 1.f / 60.f
++                            : std::chrono::duration<float>{now - sLast}.count();
++    sLast = now;
++    ImGui::GetIO().DeltaTime = delta > 0.f ? delta : 1.f / 60.f;
++  }
++#else
+   ImGui_ImplSDL3_NewFrame();
++#endif
+ 
+   ImGuiIO& io = ImGui::GetIO();
+   io.DisplayFramebufferScale = framebufferScale;
+@@ -268,12 +303,15 @@ void render(const wgpu::RenderPassEncoder& pass, const DrawData& drawData) noexc
+   if (data->CmdListsCount == 0) {
+     return;
+   }
++#ifndef __SWITCH__
+   if (g_useSdlRenderer) {
+     SDL_Renderer* renderer = window::get_sdl_renderer();
+     SDL_RenderClear(renderer);
+     ImGui_ImplSDLRenderer3_RenderDrawData(data, renderer);
+     SDL_RenderPresent(renderer);
+-  } else {
++  } else
++#endif
++  {
+     pass.PushDebugGroup("Aurora: Dear Imgui");
+     ImGui_ImplWGPU_RenderDrawData(data, pass.Get());
+     pass.PopDebugGroup();
+@@ -281,6 +319,7 @@ void render(const wgpu::RenderPassEncoder& pass, const DrawData& drawData) noexc
+ }
+ 
+ ImTextureID add_texture(uint32_t width, uint32_t height, const uint8_t* data) noexcept {
++#ifndef __SWITCH__
+   if (SDL_Renderer* renderer = window::get_sdl_renderer()) {
+     SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, width, height);
+     SDL_UpdateTexture(texture, nullptr, data, width * 4);
+@@ -288,6 +327,7 @@ ImTextureID add_texture(uint32_t width, uint32_t height, const uint8_t* data) no
+     g_sdlTextures.push_back(texture);
+     return reinterpret_cast<ImTextureID>(texture);
+   }
++#endif
+   const wgpu::Extent3D size{
+       .width = width,
+       .height = height,
+diff --git a/lib/webgpu/gpu.cpp b/lib/webgpu/gpu.cpp
+index 7ad9e4d..0e88b6e 100644
+--- a/lib/webgpu/gpu.cpp
++++ b/lib/webgpu/gpu.cpp
+@@ -28,6 +28,11 @@
+ #ifdef WEBGPU_DAWN
+ #include "../dawn/TracyPlatform.hpp"
+ #include <dawn/native/DawnNative.h>
++#if defined(__SWITCH__) && defined(DAWN_ENABLE_BACKEND_OPENGLES)
++#include <dawn/native/OpenGLBackend.h>
++// From devkitPro's statically linked Mesa libEGL.
++extern "C" void (*eglGetProcAddress(const char* procname))();
++#endif
+ #endif
+ 
+ namespace aurora::webgpu {
+@@ -814,7 +819,18 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+     return false;
+   }
+   {
++#if defined(__SWITCH__) && defined(DAWN_ENABLE_BACKEND_OPENGLES)
++    // Horizon has no dynamic loader: hand Dawn the statically linked EGL (devkitPro's Mesa).
++    dawn::native::opengl::RequestAdapterOptionsGetGLProc glProcOptions;
++    glProcOptions.getProc = reinterpret_cast<dawn::native::opengl::EGLGetProcProc>(&eglGetProcAddress);
++    glProcOptions.display = nullptr; // EGL_NO_DISPLAY: Dawn opens the default display
++    const wgpu::ChainedStruct* adapterChain =
++        backend == wgpu::BackendType::OpenGLES ? reinterpret_cast<const wgpu::ChainedStruct*>(&glProcOptions) : nullptr;
++#else
++    const wgpu::ChainedStruct* adapterChain = nullptr;
++#endif
+     const wgpu::RequestAdapterOptions options{
++        .nextInChain = adapterChain,
+         .featureLevel = wgpu::FeatureLevel::Compatibility,
+         .powerPreference = wgpu::PowerPreference::HighPerformance,
+         .backendType = backend,

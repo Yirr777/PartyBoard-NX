@@ -1,0 +1,44 @@
+# IDE folders
+.idea/
+.vs/
+.vscode/
+
+# Caches
+__pycache__
+.mypy_cache
+.cache/
+
+# Original files
+orig/*/*
+!orig/*/.gitkeep
+*.dol
+*.rel
+*.elf
+*.o
+*.map
+*.MAP
+
+# Build files
+build/
+.ninja_*
+build.ninja
+
+# decompctx output
+ctx.*
+*.ctx
+
+# Generated configs
+objdiff.json
+compile_commands.json
+
+# Miscellaneous
+/*.txt
+*.exe
+# Nintendo Switch build (see docs/switch.md)
+build-switch/
+dist/
+extern/dawn-switch/
+extern/mesa-switch/
+extern/nvk-switch/
+*.log
+build-forwarder/

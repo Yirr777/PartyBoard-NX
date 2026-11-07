@@ -1,0 +1,119 @@
+diff --git a/absl/base/internal/sysinfo.cc b/absl/base/internal/sysinfo.cc
+index b103f49..7288613 100644
+--- a/absl/base/internal/sysinfo.cc
++++ b/absl/base/internal/sysinfo.cc
+@@ -472,6 +472,13 @@ pid_t GetTID() {
+   return static_cast<pid_t>(zx_thread_self());
+ }
+ 
++#elif defined(__SWITCH__)
++
++pid_t GetTID() {
++  const auto self = reinterpret_cast<uintptr_t>(pthread_self());
++  return static_cast<pid_t>(self ^ (self >> 32));
++}
++
+ #else
+ 
+ // Fallback implementation of `GetTID` using `pthread_self`.
+diff --git a/absl/base/internal/thread_identity.cc b/absl/base/internal/thread_identity.cc
+index 0471a25..de24750 100644
+--- a/absl/base/internal/thread_identity.cc
++++ b/absl/base/internal/thread_identity.cc
+@@ -85,8 +85,8 @@ void SetCurrentThreadIdentity(ThreadIdentity* identity,
+                   reclaimer);
+ 
+ #if defined(__wasi__) || defined(__EMSCRIPTEN__) || defined(__MINGW32__) || \
+-    defined(__hexagon__)
+-  // Emscripten, WASI and MinGW pthread implementations does not support
++    defined(__hexagon__) || defined(__SWITCH__)
++  // Emscripten, WASI, MinGW, and libnx pthread implementations do not support
+   // signals. See
+   // https://kripken.github.io/emscripten-site/docs/porting/pthreads.html for
+   // more information.
+diff --git a/absl/container/internal/hash_policy_traits.h b/absl/container/internal/hash_policy_traits.h
+index e469d71..893ac98 100644
+--- a/absl/container/internal/hash_policy_traits.h
++++ b/absl/container/internal/hash_policy_traits.h
+@@ -155,9 +155,15 @@ template <class Policy, class = void>
+ // silent error: the address of * will never be NULL [-Werror=address]
+ #pragma GCC diagnostic ignored "-Waddress"
+ #endif
++#if defined(__SWITCH__)
++    // mp4-switch: devkitA64's GCC 16 rejects comparing a function template's address with
++    // nullptr in a constant expression; the non-type-erased hasher is equivalent.
++    return &hash_slot_fn_non_type_erased<Hash, kIsDefault>;
++#else
+     return Policy::template get_hash_slot_fn<Hash, kIsDefault>() == nullptr
+                ? &hash_slot_fn_non_type_erased<Hash, kIsDefault>
+                : Policy::template get_hash_slot_fn<Hash, kIsDefault>();
++#endif
+ #if defined(__GNUC__) && !defined(__clang__)
+ #pragma GCC diagnostic pop
+ #endif
+diff --git a/absl/container/internal/raw_hash_set.cc b/absl/container/internal/raw_hash_set.cc
+index d37c781..35647bc 100644
+--- a/absl/container/internal/raw_hash_set.cc
++++ b/absl/container/internal/raw_hash_set.cc
+@@ -80,14 +80,14 @@ void ValidateMaxCapacity(size_t capacity, size_t key_size, size_t slot_size) {
+ // Returns "random" seed.
+ inline size_t RandomSeed() {
+   constexpr size_t kIncrement = 0xad53;
+-#ifdef ABSL_HAVE_THREAD_LOCAL
++#if defined(ABSL_HAVE_THREAD_LOCAL) && !defined(__SWITCH__)
+   static thread_local size_t counter = 0;
+   counter += kIncrement;
+   size_t value = counter;
+-#else   // ABSL_HAVE_THREAD_LOCAL
++#else   // ABSL_HAVE_THREAD_LOCAL && !__SWITCH__
+   static std::atomic<size_t> counter(0);
+-  size_t value = counter.fetch_add(kIncrement, std::memory_order_relaxed);
+-#endif  // ABSL_HAVE_THREAD_LOCAL
++  size_t value = counter.fetch_add(kIncrement, std::memory_order_relaxed) + kIncrement;
++#endif  // ABSL_HAVE_THREAD_LOCAL && !__SWITCH__
+   return value ^ static_cast<size_t>(reinterpret_cast<uintptr_t>(&counter));
+ }
+ 
+diff --git a/absl/debugging/internal/elf_mem_image.h b/absl/debugging/internal/elf_mem_image.h
+index c8a1036..21e080c 100644
+--- a/absl/debugging/internal/elf_mem_image.h
++++ b/absl/debugging/internal/elf_mem_image.h
+@@ -35,7 +35,7 @@
+ #if defined(__ELF__) && !defined(__OpenBSD__) && !defined(__QNX__) &&    \
+     !defined(__asmjs__) && !defined(__wasm__) && !defined(__HAIKU__) &&  \
+     !defined(__sun) && !defined(__VXWORKS__) && !defined(__hexagon__) && \
+-    !defined(__XTENSA__)
++    !defined(__XTENSA__) && !defined(__SWITCH__)
+ #define ABSL_HAVE_ELF_MEM_IMAGE 1
+ #endif
+ 
+diff --git a/absl/time/internal/cctz/src/time_zone_info.cc b/absl/time/internal/cctz/src/time_zone_info.cc
+index f7ed379..0e1783c 100644
+--- a/absl/time/internal/cctz/src/time_zone_info.cc
++++ b/absl/time/internal/cctz/src/time_zone_info.cc
+@@ -61,6 +61,11 @@
+ #include "absl/time/internal/cctz/src/time_zone_posix.h"
+ #include "absl/time/internal/cctz/src/tzfile.h"
+ 
++#if defined(__SWITCH__)
++// newlib declares fdopen only outside strict ISO C++ mode.
++extern "C" FILE* fdopen(int, const char*);
++#endif
++
+ namespace absl {
+ ABSL_NAMESPACE_BEGIN
+ namespace time_internal {
+diff --git a/absl/time/internal/cctz/src/time_zone_libc.cc b/absl/time/internal/cctz/src/time_zone_libc.cc
+index 362da1a..423b900 100644
+--- a/absl/time/internal/cctz/src/time_zone_libc.cc
++++ b/absl/time/internal/cctz/src/time_zone_libc.cc
+@@ -81,6 +81,9 @@ auto tm_zone(const std::tm& tm) -> decltype(tzname[0]) {
+   const bool is_dst = tm.tm_isdst > 0;
+   return tzname[is_dst];
+ }
++#elif defined(__SWITCH__)
++auto tm_gmtoff(const std::tm&) -> long { return 0; }
++auto tm_zone(const std::tm&) -> const char* { return "UTC"; }
+ #else
+ // Adapt to different spellings of the struct std::tm extension fields.
+ #if defined(tm_gmtoff)

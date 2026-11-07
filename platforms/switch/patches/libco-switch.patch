@@ -1,0 +1,16 @@
+diff --git a/settings.h b/settings.h
+index 418c00a..f4021bd 100644
+--- a/settings.h
++++ b/settings.h
+@@ -122,6 +122,11 @@
+   #define section(name) __pragma(code_seg(LIBCO_TOSTRING("." #name))) __declspec(allocate(LIBCO_TOSTRING("." #name)))
+ #elif defined(__APPLE__)
+   #define section(name) __attribute__((section("__TEXT,__" #name)))
++#elif defined(__SWITCH__)
++  /* mp4-switch: the "#" below only drops GCC's section flags where "#" starts a comment; on
++     AArch64 that is "//". Without it the swap code lands in a read-only, non-executable section,
++     which emulators tolerate and the console does not. */
++  #define section(name) __attribute__((section("." #name ",\"ax\",%progbits //")))
+ #else
+   #define section(name) __attribute__((section("." #name "#")))
+ #endif

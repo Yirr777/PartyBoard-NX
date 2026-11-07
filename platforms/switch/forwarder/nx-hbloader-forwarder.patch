@@ -1,0 +1,61 @@
+diff --git a/hbl.json b/hbl.json
+index 7cf2d05..73e52ed 100644
+--- a/hbl.json
++++ b/hbl.json
+@@ -1,8 +1,8 @@
+ {
+-    "name": "hbloader",
+-    "title_id": "0x010000000000100D",
+-    "title_id_range_min": "0x010000000000100D",
+-    "title_id_range_max": "0x010000000000100D",
++    "name": "PartyBoard",
++    "title_id": "0x01FF50424E580000",
++    "title_id_range_min": "0x01FF50424E580000",
++    "title_id_range_max": "0x01FF50424E580000",
+     "main_thread_stack_size": "0x100000",
+     "main_thread_priority": 44,
+     "default_cpu_id": 0,
+@@ -232,7 +232,7 @@
+         },
+         {
+             "type": "application_type",
+-            "value": 2
++            "value": 1
+         },
+         {
+             "type": "min_kernel_version",
+@@ -246,7 +246,7 @@
+             "type": "debug_flags",
+             "value": {
+                 "allow_debug": false,
+-		"force_debug_prod": false,
++                "force_debug_prod": false,
+                 "force_debug": true
+             }
+         },
+diff --git a/source/main.c b/source/main.c
+index 78e4502..41e271a 100644
+--- a/source/main.c
++++ b/source/main.c
+@@ -3,7 +3,9 @@
+ #include <fcntl.h>
+ #include <unistd.h>
+ 
+-#define DEFAULT_NRO "sdmc:/hbmenu.nro"
++// Party Board forwarder: start the port directly, and leave to HOME when it returns.
++#define DEFAULT_NRO "sdmc:/switch/partyboard/partyboard.nro"
++static int g_forwarderStarted;
+ 
+ const char g_noticeText[] =
+     "nx-hbloader " VERSION "\0"
+@@ -353,6 +355,10 @@ void loadNro(void)
+ 
+     if (g_nextNroPath[0] == '\0')
+     {
++        // The port returned without asking for another NRO: back to the HOME menu, not hbmenu.
++        if (g_forwarderStarted)
++            svcExitProcess();
++        g_forwarderStarted = 1;
+         memcpy(g_nextNroPath, DEFAULT_NRO, sizeof(DEFAULT_NRO));
+         memcpy(g_nextArgv,    DEFAULT_NRO, sizeof(DEFAULT_NRO));
+     }

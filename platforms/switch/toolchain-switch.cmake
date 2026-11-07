@@ -1,0 +1,12 @@
+# Nintendo Switch: devkitPro's devkitA64, libnx and portlibs.
+if(DEFINED ENV{DEVKITPRO})
+    file(TO_CMAKE_PATH "$ENV{DEVKITPRO}" _dkp)
+else()
+    set(_dkp "/opt/devkitpro")
+endif()
+if(NOT EXISTS "${_dkp}/cmake/Switch.cmake")
+    message(FATAL_ERROR "No devkitPro at ${_dkp}; install switch-dev or set DEVKITPRO.")
+endif()
+set(ENV{DEVKITPRO} "${_dkp}")
+include("${_dkp}/cmake/Switch.cmake")
+set(NX ON CACHE BOOL "Build for Nintendo Switch" FORCE)
