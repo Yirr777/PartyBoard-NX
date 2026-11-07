@@ -43,8 +43,8 @@ controller styles it accepts shows every controller struck out, and nothing can 
 only offered from the settings menu, once the game runs.
 
 **Holding a button at startup.** Reading L or ZL with libnx's `padUpdate` right after the pads layer
-starts came back empty in two console tests, even polling for 250 ms. The launcher menu is
-therefore a setting ("Skip Party Board Main Menu", stored as `backend.switchSkipMainMenu` because
+starts came back empty in two console tests, even polling for 250 ms, so that shortcut was removed.
+The launcher menu is a setting ("Skip Party Board Main Menu", stored as `backend.switchSkipMainMenu` because
 earlier builds had saved the PC key without showing it).
 
 **Settings that do not apply on a console** are hidden: fullscreen and window size, focus and
@@ -71,6 +71,45 @@ thread's, so the mixer is pinned to core 2 at a slightly higher priority.
 Enable the log and each 300 frames gives a `[nx] perf` line with mode, fps, frame work, heap use and
 audio underruns. Memory use keeps climbing during a session (about 1.4 GiB after 20 minutes, with
 1.8 GiB free). A full party is needed to tell whether it levels off.
+
+## Widescreen (16:9)
+
+`include/port/widescreen.h` is the C version of Dolphin's "$16:9 Widescreen" Gecko code for
+GMPE01 (`Data/Sys/GameSettings/GMPE01.ini`), the approach SwitchWaker took for Wind Waker. It is
+anamorphic: the game still draws its 640x480 frame and Aurora stretches it to the screen
+(`AURORA_VIEWPORT_STRETCH`), so the game draws everything 3/4 as wide.
+
+| Gecko code line | Function | Here |
+|---|---|---|
+| `C_MTXPerspective`, `C_MTXLightPerspective`: aspect x1.336 | All 3D and light projections | `__MTXAspectScale` (Aurora patch), x4/3 |
+| 576.0 -> 768.0 and `GXSetProjection` sets m[0][3] = -0.75 for that ortho | `HuSprDispInit`, `MesDispFunc` | 2D space -96..672 (`sprput.c`, `window.c`) |
+| `HuWinCreate` keeps 576.0 | Window centring | unchanged |
+| 640.0 -> 853.33, `cmpwi 640` -> 854, `print8` x*4/3 | `pfDrawFonts` | `printfunc.c` |
+| `objMesh`: `ObjCullCheck` -> 1; `BoardCameraCullCheck` -> `blr` | Culling off | Culling widened instead (`hsfdraw.c`, `board/main.c`) |
+| x*1.336-96 | `UpdateBoardStatus`, `BoardStatusItemSet`, `ExecItemPick`, `ItemGetPos`, `SetItemUIStatus` | `HuWideX` in `board/ui.c` |
+| `m432Dll` +0x10088: x*1.336-96 | Its own 3D-to-2D | `HuWideX` in `REL/m432Dll/main.c` |
+
+`Hu3D3Dto2D` needs no change: it uses the 4:3 aspect and the 576 space, which line up with the
+widened 3D and 2D. Additions not in the code: sprites and movies as wide as the 576 screen are
+stretched to the full width (`HuWideBackdropMtx`), so menus and movie transitions have no side bars;
+in file select the chosen memory card flies further, past the 16:9 edge.
+
+## Bundled shader cache
+
+The package carries two databases from a console, beside the `.nro`:
+
+- `initial_pipeline_cache.db`: Aurora's list of pipelines (`cache/pipeline_cache.db`). Aurora merges
+  it into the player's list at start and builds those pipelines ahead of use.
+- `initial_dawn_cache.db`: Dawn's compiled shaders (`cache/dawn_cache.db`). Every Switch has the
+  same GPU and driver, so they are valid for the same build. `portmain.cpp` copies it once, when the
+  player has none (`std::filesystem::copy_file` is not implemented by devkitA64's libc, so it copies
+  with stdio).
+
+To refresh them, play the scenes to cover with a new build, then copy `cache/pipeline_cache.db` and
+`cache/dawn_cache.db` from the console (with the game closed) to `platforms/switch/shader-cache/`
+under the `initial_` names. A cache made by another build still loads; entries that no longer match
+are compiled again. The pauses that remain when a scene loads (about 0.3-0.6 s) are loading, not
+shaders: they are the same with a full cache.
 
 ## Emulator-only workaround
 

@@ -481,6 +481,40 @@ extern "C" int port_main(int argc, char* argv[]) {
         std::error_code ec;
         std::filesystem::create_directories(switchCache, ec);
         std::filesystem::create_directories(PartyBoard_ConfigPath, ec);
+        // The package carries shaders already compiled on a console (every Switch has the same GPU
+        // and driver), so a first launch does not stop to compile them. Aurora reads
+        // initial_pipeline_cache.db beside the .nro by itself; Dawn's cache is copied once.
+        {
+            const std::filesystem::path dawnCache = std::filesystem::path(switchCache) / "dawn_cache.db";
+            const std::filesystem::path dawnSeed = std::filesystem::path(switchResources) / "initial_dawn_cache.db";
+            if (!std::filesystem::exists(dawnCache, ec) && std::filesystem::exists(dawnSeed, ec)) {
+                // std::filesystem::copy_file is not implemented by devkitA64's libc.
+                const std::filesystem::path tmp = dawnCache.string() + ".tmp";
+                bool ok = false;
+                if (FILE* in = fopen(dawnSeed.string().c_str(), "rb")) {
+                    if (FILE* out = fopen(tmp.string().c_str(), "wb")) {
+                        static char buf[256 * 1024];
+                        size_t n;
+                        ok = true;
+                        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+                            if (fwrite(buf, 1, n, out) != n) {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        ok = fclose(out) == 0 && ok && !ferror(in);
+                    }
+                    fclose(in);
+                }
+                if (ok) {
+                    std::filesystem::rename(tmp, dawnCache, ec);
+                    ok = !ec;
+                } else {
+                    std::filesystem::remove(tmp, ec);
+                }
+                PartyBoardMainLog.info("Seeded the shader cache from {}: {}", dawnSeed.string(), ok ? "ok" : "failed");
+            }
+        }
         config.resourcesPath = switchResources.c_str();
         config.cachePath = switchCache.c_str();
         config.startFullscreen = true;
@@ -500,11 +534,7 @@ extern "C" int port_main(int argc, char* argv[]) {
     snprintf(windowTitle, sizeof(windowTitle), "PartyBoard %s", PARTY_BOARD_WC_DESCRIBE);
     VISetWindowTitle(windowTitle);
 
-    if (partyboard::getSettings().video.lockAspectRatio) {
-        AuroraSetViewportPolicy(AURORA_VIEWPORT_FIT);
-    } else {
-        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-    }
+    partyboard::applyAspect();
     // prevent board from going black intermittently for a few frames
     AuroraSetDrawsBlocking(true);
     VISetFrameBufferScale(partyboard::getSettings().game.internalResolutionScale.getValue());
@@ -592,8 +622,7 @@ extern "C" int port_main(int argc, char* argv[]) {
 #ifdef __SWITCH__
     // A console should go straight to the game. The menu stays reachable because language, graphics
     // backend and save file type can only change there.
-    const bool showPreLaunchUI = forcePreLaunchUI || !partyboard::getSettings().backend.skipPreLaunchUI ||
-        mp4_switch_menu_held();
+    const bool showPreLaunchUI = forcePreLaunchUI || !partyboard::getSettings().backend.skipPreLaunchUI;
 #else
     const bool showPreLaunchUI = !partyboard::getSettings().backend.skipPreLaunchUI;
 #endif

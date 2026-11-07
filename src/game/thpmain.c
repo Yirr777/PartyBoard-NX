@@ -4,6 +4,7 @@
 #include "game/init.h"
 #include "game/process.h"
 #include "game/sprite.h"
+#include "port/widescreen.h"
 
 #include <string.h>
 
@@ -331,6 +332,7 @@ static void THPViewSprFunc(HUSPRITE *arg0)
         MTXConcat(*arg0->groupMtx, sp48, sp48);
         temp_r30 = -((s32)audioTrack.unk00 / 2);
         temp_r29 = -((s32)audioTrack.unk04 / 2);
+        HuWideBackdropMtx(sp48, temp_r30, temp_r30 + (s32)audioTrack.unk00);
         GXSetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
 #ifdef TARGET_PC
         {

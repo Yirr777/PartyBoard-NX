@@ -530,12 +530,29 @@ SettingsWindow::SettingsWindow(bool prelaunch)
                 .onChange = [](bool value) { aurora_enable_vsync(value); },
             });
 #endif
+#ifdef __SWITCH__
+        config_bool_select(leftPane, rightPane, getSettings().video.widescreen,
+            {
+                .key = "Widescreen",
+                .helpText = "Shows a wider view on 16:9 screens, with the HUD moved toward the edges. Turn it off "
+                            "for the original 4:3 picture with side bars. Full-screen pictures stay 4:3.",
+                .onChange = [](bool) { applyAspect(); },
+            });
+#else
+        config_bool_select(leftPane, rightPane, getSettings().video.widescreen,
+            {
+                .key = "Widescreen",
+                .helpText = "Shows a wider 16:9 view instead of stretching the 4:3 picture.",
+                .onChange = [](bool) { applyAspect(); },
+            });
         config_bool_select(leftPane, rightPane, getSettings().video.lockAspectRatio,
             {
                 .key = "Lock 4:3 Aspect Ratio",
                 .helpText = "Lock the game's aspect ratio to the original.",
-                .onChange = [](bool value) { AuroraSetViewportPolicy(value ? AURORA_VIEWPORT_FIT : AURORA_VIEWPORT_STRETCH); },
+                .isDisabled = [] { return getSettings().video.widescreen.getValue(); },
+                .onChange = [](bool) { applyAspect(); },
             });
+#endif
 #ifndef __SWITCH__
         config_bool_select(leftPane, rightPane, getSettings().game.pauseOnFocusLost,
             {

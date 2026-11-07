@@ -56,6 +56,7 @@ struct UserSettings {
         ConfigVar<bool> enableFullscreen;
         ConfigVar<bool> enableVsync;
         ConfigVar<bool> lockAspectRatio;
+        ConfigVar<bool> widescreen;
         ConfigVar<bool> enableFpsOverlay;
         ConfigVar<int> fpsOverlayCorner;
     } video;
@@ -127,6 +128,9 @@ struct UserSettings {
 };
 
 UserSettings& getSettings();
+
+// Applies video.widescreen and video.lockAspectRatio: the viewport policy and the game's 16:9 view.
+void applyAspect();
 
 // The language the game starts in: on Switch, the console's language unless one was picked.
 GameLanguage effectiveLanguage();

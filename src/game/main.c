@@ -1,4 +1,5 @@
 #include "game/data.h"
+#include "port/widescreen.h"
 #include "game/dvd.h"
 #include "game/gamework.h"
 #include "game/gamework_data.h"
@@ -35,6 +36,16 @@ const char *__asan_default_options()
 }
 
 bool PartyBoard_IsRunning = TRUE;
+
+SHARED_SYM int PartyBoard_Widescreen;
+
+extern f32 __MTXAspectScale;
+
+void PartyBoard_SetWidescreen(int enable)
+{
+    PartyBoard_Widescreen = enable ? 1 : 0;
+    __MTXAspectScale = HU_WIDE_ASPECT;
+}
 bool PartyBoard_IsShuttingDown = FALSE;
 bool PartyBoard_IsGameLaunched = FALSE;
 bool PartyBoard_RestartRequested = FALSE;

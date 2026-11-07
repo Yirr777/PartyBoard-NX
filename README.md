@@ -21,14 +21,17 @@ Tested on one console, in handheld and docked, using the NVK Vulkan driver:
 - 18 of the 61 minigames have been played through on the console, with no crashes.
 - Switch button prompts in the game's messages, the system's controller screen (- menu > Input >
   Connect Controllers), a volume setting and higher-resolution shadows.
+- Native 16:9: a wider view, not a stretched one (- menu > Video > Widescreen, on by default).
+- Video capture: hold the Capture button. It works when started from the HOME menu icon; from the
+  Homebrew Menu it depends on the game used to open it.
+- Up to four controllers, with rumble.
 
 Known problems:
 
 - One crash while loading the disc has been seen once, on launch. If the game closes with an error, launch it again and please report it with the files listed below.
 - The first launch, and the first time each new screen appears, can pause while shaders compile.
 - The "Quick Transform" setting of the Party Board preset has no effect yet.
-- Multiplayer has been tested with two controllers. Rumble has not been tested.
-- No 16:9 widescreen yet. The game is shown in 4:3 with bars on the sides; turning off "Lock 4:3 Aspect Ratio" fills the screen by stretching the picture. Real 16:9 is planned for a later version.
+- In 16:9, full-screen pictures and movies are stretched to the screen width. Report anything that shows at the screen edges and should not.
 
 ## Install
 
@@ -60,6 +63,7 @@ See [docs/switch.md](docs/switch.md). [docs/port-notes.md](docs/port-notes.md) d
 - [Aurora](https://github.com/encounter/aurora), [MusyX](https://github.com/AxioDL/musyx) and [libco](https://github.com/higan-emu/libco).
 - [Super Mario Strikers](https://github.com/new-coke/strikers) for the Switch recipe, with [dawn-switch](https://github.com/new-coke/dawn-switch) and [sdl3on2](https://github.com/new-coke/sdl3on2).
 - [mesa-switch](https://github.com/danfromtico/mesa-switch) for NVK on Horizon.
+- The 16:9 mode follows [Dolphin](https://github.com/dolphin-emu/dolphin)'s `$16:9 Widescreen` code for GMPE01 and the approach of [SwitchWaker](https://github.com/centollOS/SwitchWaker).
 
 Licenses of the bundled software are listed in [platforms/switch/THIRD_PARTY.md](platforms/switch/THIRD_PARTY.md).
 

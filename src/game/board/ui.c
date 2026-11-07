@@ -1,5 +1,6 @@
 #include "types.h"
 #include "game/board/ui.h"
+#include "port/widescreen.h"
 #include "game/audio.h"
 #include "game/board/com.h"
 #include "game/board/item.h"
@@ -252,7 +253,7 @@ void BoardStatusItemSet(s32 arg0)
         temp_r31->unk04.x = temp_r31->unk10.x;
         temp_r31->unk04.y = temp_r31->unk10.y;
         temp_r31->unk00_bit2 = 0;
-        HuSprGrpPosSet(temp_r31->unk02, temp_r31->unk04.x, temp_r31->unk04.y);
+        HuSprGrpPosSet(temp_r31->unk02, HuWideX(temp_r31->unk04.x), temp_r31->unk04.y);
         for (j = 0; j < ARRAY_COUNT(GWPlayer->items); j++) {
             if (itemMdlId[i][j] != -1) {
                 BoardModelVisibilitySet(itemMdlId[i][j], arg0);
@@ -576,7 +577,7 @@ static s32 UpdateBoardStatus(void)
         temp_r28 = statusColTbl[GWPlayer[i].color];
         HuSprColorSet(temp_r31->unk02, 0, temp_r28[0], temp_r28[1], temp_r28[2]);
         MoveBoardStatus(i);
-        HuSprGrpPosSet(temp_r31->unk02, temp_r31->unk04.x, temp_r31->unk04.y);
+        HuSprGrpPosSet(temp_r31->unk02, HuWideX(temp_r31->unk04.x), temp_r31->unk04.y);
     }
     return 0;
 }
@@ -1285,12 +1286,12 @@ static void ExecItemPick(void)
                 sp40.y = teamItemStatusPosTbl[var_r22].y;
             }
             else {
-                sp40.x = statusPosTbl[i][0] + statusHideOfsTbl[i];
+                sp40.x = HuWideX(statusPosTbl[i][0] + statusHideOfsTbl[i]);
                 sp40.y = statusPosTbl[i][1];
             }
         }
         else {
-            sp40.x = statusPosTbl[i][0];
+            sp40.x = HuWideX(statusPosTbl[i][0]);
             sp40.y = statusPosTbl[i][1];
         }
         for (j = 0; j < ARRAY_COUNT(statusItemPosTbl); j++) {
@@ -1462,7 +1463,7 @@ static void SetItemUIStatus(s32 arg0)
         case 3:
         case 0:
             for (i = 0; i < 4; i++) {
-                var_f31 = statusPosTbl[i][0];
+                var_f31 = HuWideX(statusPosTbl[i][0]);
                 var_f30 = statusPosTbl[i][1];
                 for (j = 0; j < 6; j++) {
                     (temp_r28 + 4)[i][j].x = statusSprPosTbl[j + 11][0];
@@ -1476,7 +1477,7 @@ static void SetItemUIStatus(s32 arg0)
             break;
         case 2:
             for (i = 0; i < 4; i++) {
-                var_f31 = statusPosTbl[i][0];
+                var_f31 = HuWideX(statusPosTbl[i][0]);
                 var_f30 = statusPosTbl[i][1];
                 for (j = 0; j < ARRAY_COUNT(statusItemPosTbl); j++) {
                     (temp_r28 + 4)[i][j].x = statusItemPosTbl[j][0];
@@ -1499,7 +1500,7 @@ void BoardItemGetDestPos(s32 arg0, Vec *arg1)
     Vec spC;
     s32 i;
 
-    spC.x = statusPosTbl[arg0][0];
+    spC.x = HuWideX(statusPosTbl[arg0][0]);
     spC.y = statusPosTbl[arg0][1];
     spC.z = 0.0f;
     for (i = 0; i < 3; i++) {
@@ -1524,7 +1525,7 @@ static void ItemGetPos(s32 arg0, Vec *arg1)
         spC.y = teamItemStatusPosTbl[var_r29].y;
     }
     else {
-        spC.x = statusPosTbl[arg0][0];
+        spC.x = HuWideX(statusPosTbl[arg0][0]);
         spC.y = statusPosTbl[arg0][1];
     }
     spC.z = 0.0f;

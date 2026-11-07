@@ -1,4 +1,5 @@
 #include "game/gamework_data.h"
+#include "port/widescreen.h"
 
 #include "game/armem.h"
 #include "game/audio.h"
@@ -452,7 +453,7 @@ static void MesDispFunc(HUSPRITE *sprite)
     if (window->num_chars != 0) {
         group = &HuSprGrpData[window->group];
         GXInvalidateTexAll();
-        C_MTXOrtho(proj, 0.0f, HU_DISP_HEIGHTF, 0.0f, HU_DISP_WIDTHF, 0.0f, 10.0f);
+        C_MTXOrtho(proj, 0.0f, HU_DISP_HEIGHTF, HU_WIDE_DISP_LEFT, HU_WIDE_DISP_RIGHT, 0.0f, 10.0f);
         GXSetProjection(proj, GX_ORTHOGRAPHIC);
         GXClearVtxDesc();
         GXSetVtxDesc(GX_VA_POS, GX_DIRECT);

@@ -98,6 +98,13 @@ void userAppInit(void)
         exit(1);
     }
 
+    // Video capture (hold the Capture button). Works when the title's control.nacp allows it: the
+    // forwarder's does; in title mode it is the host game's setting. It uses 96 MiB of the heap.
+    if (R_SUCCEEDED(appletInitializeGamePlayRecording()))
+        appletSetGamePlayRecordingState(true);
+    else
+        fprintf(stderr, "[nx] video capture not available for this title\n");
+
     // Exit is not locked: HOME > Close ends the process at once, since the game loop has no
     // shutdown path to run first.
     // Shader compilation dominates the first launch; run the CPU at full speed while it does.
@@ -171,22 +178,6 @@ int mp4_switch_show_controllers(void)
     else if (R_FAILED(rc))
         fprintf(stderr, "[nx] controller screen failed: 0x%x\n", (unsigned)rc);
     return R_SUCCEEDED(rc);
-}
-
-int mp4_switch_menu_held(void)
-{
-    // The first reads after startup can come back empty before the controllers report in, so look
-    // for a quarter of a second.
-    PadState pad;
-    padInitializeAny(&pad);
-    for (int i = 0; i < 15; i++)
-    {
-        padUpdate(&pad);
-        if ((padGetButtons(&pad) & (HidNpadButton_L | HidNpadButton_ZL)) != 0)
-            return 1;
-        svcSleepThread(16 * 1000000LL);
-    }
-    return 0;
 }
 
 void mp4_switch_boot_done(void)

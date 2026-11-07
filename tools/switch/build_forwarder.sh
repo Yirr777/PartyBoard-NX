@@ -45,7 +45,10 @@ rm -rf "$STAGE"; mkdir -p "$STAGE/exefs" "$STAGE/control" "$STAGE/out"
 cp "$WORK/nx-hbloader/hbl.nso" "$STAGE/exefs/main"
 cp "$WORK/nx-hbloader/hbl.npdm" "$STAGE/exefs/main.npdm"
 cp "$PORT/platforms/switch/icon.jpg" "$STAGE/control/icon_AmericanEnglish.dat"
-nacptool --create "Party Board" "Yirr777" "0.1.0" "$STAGE/control/control.nacp" --titleid=$TITLE_ID
+nacptool --create "Party Board" "Yirr777" "0.2.0" "$STAGE/control/control.nacp" --titleid=$TITLE_ID
+# nacptool leaves video capture off. VideoCapture (offset 0x3035) = 1, "enabled": the game turns
+# recording on itself (appletInitializeGamePlayRecording in platforms/switch/nx_init.c).
+printf '\001' | dd of="$STAGE/control/control.nacp" bs=1 seek=$((0x3035)) conv=notrunc status=none
 
 # hacBrewPack's log shows values derived from the keys, so it is not kept.
 (cd "$STAGE" && "$WORK/hacBrewPack/hacbrewpack" -k "$KEYS" --titleid $TITLE_ID --exefsdir exefs \

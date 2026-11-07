@@ -1,4 +1,5 @@
 #include "REL/executor.h"
+#include "port/widescreen.h"
 #include "game/chrman.h"
 #include "game/disp.h"
 #include "game/frand.h"
@@ -2351,7 +2352,8 @@ void fn_1_BAA8(UnkM432DllStruct *arg0)
     sp20.y += 220.0f;
     fn_1_1A60(&sp20, lbl_1_data_A0[arg0->unk_184 >> 1], &sp14);
 
-    arg0->unk_110 = sp14.x;
+    // Its own 3D-to-2D (camera aspect, 0.9 of the viewport) gives 4:3 positions.
+    arg0->unk_110 = HuWideX(sp14.x);
     arg0->unk_114 = sp14.y;
     if (NULL != arg0->unk_C4) {
         var_f31 = 0.0f;

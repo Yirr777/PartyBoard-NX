@@ -15,6 +15,9 @@ rm -rf "$STAGE"
 mkdir -p "$OUT"
 cp "$BUILD/partyboard.nro" "$OUT/"
 cp -r res "$OUT/res"
+# Shaders compiled on a console, so the first launch does not pause to compile them
+# (src/port/portmain.cpp). How to refresh them: docs/port-notes.md, "Bundled shader cache".
+cp platforms/switch/shader-cache/initial_pipeline_cache.db platforms/switch/shader-cache/initial_dawn_cache.db "$OUT/"
 mkdir -p "$OUT/licenses"
 cp LICENSE "$OUT/licenses/LICENSE-PARTYBOARD.txt"
 cp extern/aurora/LICENSE "$OUT/licenses/LICENSE-AURORA.txt"

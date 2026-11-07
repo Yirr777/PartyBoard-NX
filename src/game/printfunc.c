@@ -1,4 +1,5 @@
 #include "game/printfunc.h"
+#include "port/widescreen.h"
 #include "dolphin.h"
 #include "game/disp.h"
 #include "game/init.h"
@@ -84,7 +85,7 @@ s16 print8(s16 x, s16 y, float scale, char *str, ...)
     empstrline = strline_curr->empstrline_next;
     strline_curr->type = 0;
     strline_curr->color = fontcolor;
-    strline_curr->x = x;
+    strline_curr->x = PartyBoard_Widescreen ? x * 4 / 3 : x;
     strline_curr->y = y;
     strline_curr->scale = scale;
     dst = strline_curr->str;
@@ -137,7 +138,7 @@ void pfDrawFonts(void)
     if (saftyFrameF) {
         WireDraw();
     }
-    MTXOrtho(proj, 0, HU_FB_HEIGHT, 0, HU_FB_WIDTH, 0, 10);
+    MTXOrtho(proj, 0, HU_FB_HEIGHT, 0, HU_WIDE_FB_RIGHT, 0, 10);
     GXSetProjection(proj, GX_ORTHOGRAPHIC);
     MTXIdentity(modelview);
     GXLoadPosMtxImm(modelview, GX_PNMTX0);
@@ -296,7 +297,7 @@ void pfDrawFonts(void)
                                 GXEnd();
                             }
                             x += char_w;
-                            if (x > HU_FB_WIDTH) {
+                            if (x > HU_WIDE_FB_RIGHT) {
                                 x = 0;
                                 y += char_h;
                             }

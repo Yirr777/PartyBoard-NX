@@ -1,4 +1,5 @@
 #include "dolphin/gx.h"
+#include "port/widescreen.h"
 #include "dolphin/mtx.h"
 #include "dolphin/vi.h"
 #include "game/disp.h"
@@ -28,7 +29,7 @@ void HuSprDispInit(void)
     }
     bmpCCIdx = 0;
     GXInvalidateTexAll();
-    MTXOrtho(proj, 0, HU_DISP_HEIGHT, 0, HU_DISP_WIDTH, 0, 10);
+    MTXOrtho(proj, 0, HU_DISP_HEIGHT, HU_WIDE_DISP_LEFT, HU_WIDE_DISP_RIGHT, 0, 10);
     GXSetProjection(proj, GX_ORTHOGRAPHIC);
     if(RenderMode->field_rendering) {
         GXSetViewportJitter(0, 0, HU_FB_WIDTH, HU_FB_HEIGHT, 0, 1, VIGetNextField());
@@ -117,6 +118,11 @@ void HuSprDisp(HUSPRITE *sprite)
         }
         mtxTransCat(modelview, sprite->pos.x, sprite->pos.y, 0);
         MTXConcat(*sprite->groupMtx, modelview, modelview);
+        if (sprite->bg) {
+            HuWideBackdropMtx(modelview, -(bg_bmp->sizeX * 16) / 2.0f, (bg_bmp->sizeX * 16) / 2.0f);
+        } else {
+            HuWideBackdropMtx(modelview, -pat->centerX, pat->sizeX - pat->centerX);
+        }
         GXLoadPosMtxImm(modelview, GX_PNMTX0);
         for(i=pat->layerNum-1; i>=0; i--) {
             float pos[4][2];

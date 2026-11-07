@@ -16,6 +16,7 @@ namespace {
     {
         auto &s = getSettings();
         s.video.lockAspectRatio.setValue(true);
+        s.video.widescreen.setValue(false);
         s.game.enableAchievementToasts.setValue(false);
         s.game.enableControllerToasts.setValue(false);
         s.game.internalResolutionScale.setValue(1);

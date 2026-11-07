@@ -1,4 +1,5 @@
 #include "game/disp.h"
+#include "port/widescreen.h"
 #include "game/hu3d.h"
 #include "game/hsfformat.h"
 #include "game/hsfload.h"
@@ -403,7 +404,7 @@ BOOL ObjCullCheck(HSFDATA *hsf, HSFOBJECT *objPtr, Mtx mtx) {
     }
     fovTan = sind(cameraP->fov * 0.5) / cosd(cameraP->fov * 0.5);
     cameraH = fovTan * z;
-    cameraW = HU_DISP_ASPECT * cameraH;
+    cameraW = HU_DISP_ASPECT * HU_WIDE_ASPECT * cameraH;
     cameraW = radius + ABS(cameraW);
     cameraH = radius + ABS(cameraH);
     if (ABS(x) < cameraW && ABS(y) < cameraH) {

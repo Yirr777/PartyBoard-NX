@@ -18,6 +18,7 @@ s32 msmSysGetOutputMode(void);
 #ifndef __MWERKS__
 #include "game/esprite.h"
 #include "game/hsfex.h"
+#include "port/widescreen.h"
 #endif
 
 #ifdef TARGET_PC
@@ -451,7 +452,8 @@ loop_exit:
             for (temp_r30 = 0; temp_r30 <= 40; temp_r30++) {
                 if (temp_r30 <= 30) {
                     temp_f31 = temp_r30 / 30.0f;
-                    sp28.x = 288.0 + (GET_ZEROSIGN(temp_r26) * (100.0 + (250.0 * sind(90.0f * temp_f31))));
+                    // The card flies off to the side; in 16:9 it has to go further to leave the screen.
+                    sp28.x = 288.0 + (GET_ZEROSIGN(temp_r26) * (100.0 + ((PartyBoard_Widescreen ? 375.0 : 250.0) * sind(90.0f * temp_f31))));
                     sp28.y = 250.0 - (100.0 * sind(180.0f * temp_f31));
                     sp28.z = (temp_r30 * 100) + 600;
                     Hu3D2Dto3D(&sp28, 1, &sp1C);

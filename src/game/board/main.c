@@ -1,4 +1,5 @@
 #include "game/board/main.h"
+#include "port/widescreen.h"
 #include "ext_math.h"
 #include "game/board/battle.h"
 #include "game/board/lottery.h"
@@ -1120,7 +1121,7 @@ s32 BoardCameraCullCheck(Vec *point, float radius)
     }
     BoardCameraPointDirGet(point, &pos);
     dot = VECDotProduct(&dir, &pos);
-    if(BOARD_FABS(dot) < cosd(camera->fov)) {
+    if(BOARD_FABS(dot) < cosd(camera->fov * HU_WIDE_ASPECT)) {
         return 0;
     } else {
         return 1;

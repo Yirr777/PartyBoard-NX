@@ -14,9 +14,6 @@ const char* mp4_switch_home(void);
 // Called once the game starts, to drop the CPU boost used for the first shader compilation.
 void mp4_switch_boot_done(void);
 
-// Whether L or ZL is held right now, which asks for the launcher menu at startup.
-int mp4_switch_menu_held(void);
-
 // Controllers the console reports as connected, the attached Joy-Con included.
 int mp4_switch_controller_count(void);
 

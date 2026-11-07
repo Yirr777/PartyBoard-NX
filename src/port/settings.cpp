@@ -1,5 +1,7 @@
 #include "port/settings.h"
 #include "port/config.hpp"
+#include "port/widescreen.h"
+#include <dolphin/gx/GXAurora.h>
 #ifdef __SWITCH__
 #include "nx_platform.h"
 #endif
@@ -10,12 +12,14 @@ UserSettings g_userSettings = {
     .video = {
         .enableFullscreen {"video.enableFullscreen", false},
         .enableVsync {"video.enableVsync", true},
-        // On Switch the game keeps its 4:3 shape (pillarboxed) until there is real 16:9: stretching
-        // it to the screen distorts the picture.
+        // Stretching the 4:3 picture to a wide screen distorts it; on Switch the choice is 16:9
+        // (port/widescreen.h) or the original 4:3 with side bars.
 #ifdef __SWITCH__
         .lockAspectRatio {"video.lockAspectRatio", true},
+        .widescreen {"video.widescreen", true},
 #else
         .lockAspectRatio {"video.lockAspectRatio", false},
+        .widescreen {"video.widescreen", false},
 #endif
         .enableFpsOverlay {"game.enableFpsOverlay", false},
         .fpsOverlayCorner {"game.fpsOverlayCorner", 0},
@@ -93,6 +97,16 @@ UserSettings& getSettings() {
     return g_userSettings;
 }
 
+void applyAspect() {
+    const bool wide = g_userSettings.video.widescreen.getValue();
+    PartyBoard_SetWidescreen(wide);
+    if (wide || !g_userSettings.video.lockAspectRatio.getValue()) {
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
+    } else {
+        AuroraSetViewportPolicy(AURORA_VIEWPORT_FIT);
+    }
+}
+
 GameLanguage effectiveLanguage() {
 #ifdef __SWITCH__
     if (g_userSettings.game.switchSystemLanguage.getValue()) {
@@ -107,6 +121,7 @@ void registerSettings() {
     Register(g_userSettings.video.enableFullscreen);
     Register(g_userSettings.video.enableVsync);
     Register(g_userSettings.video.lockAspectRatio);
+    Register(g_userSettings.video.widescreen);
     Register(g_userSettings.video.enableFpsOverlay);
     Register(g_userSettings.video.fpsOverlayCorner);
 
